@@ -1,0 +1,16 @@
+[workspace]
+resolver = "2"
+members = ["crates/interax-tui-fwk",
+  "crates/interax-tui-monitor",
+]
+
+[workspace.package]
+version = "0.0.1"
+rust-version = "1.92"
+authors = ["Zibi Braniecki"]
+edition = "2021"
+repository = "https://github.com/zbraniecki/interax"
+license = "MIT OR Apache-2.0"
+categories = ["network", "communication", "ipc"]
+
+[workspace.dependencies]
