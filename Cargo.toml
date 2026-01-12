@@ -14,3 +14,7 @@ license = "MIT OR Apache-2.0"
 categories = ["network", "communication", "ipc"]
 
 [workspace.dependencies]
+interax-tui-fwk = { path = "crates/interax-tui-fwk" }
+
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+ratatui = "0.30"

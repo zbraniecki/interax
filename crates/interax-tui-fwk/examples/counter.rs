@@ -15,7 +15,8 @@
 use std::time::Duration;
 
 use interax_tui_fwk::{
-    AppBuilder, AppContext, Component, Event, KeyCode, MainUi, Task, TaskContext, TaskSender,
+    AppBuilder, AppContext, Component, DrawContext, Event, KeyCode, MainUi, Task, TaskContext,
+    TaskSender,
 };
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -101,7 +102,7 @@ impl CounterApp {
 }
 
 impl Component for CounterApp {
-    fn draw(&self, frame: &mut Frame, area: Rect) {
+    fn draw(&self, frame: &mut Frame, area: Rect, _ctx: &DrawContext) {
         // Create layout with header, main content, and footer
         let chunks = Layout::default()
             .direction(Direction::Vertical)

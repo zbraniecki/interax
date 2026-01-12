@@ -11,23 +11,21 @@
 //! - **Event-driven**: No polling, only responds to terminal events and task messages
 //! - **Async tasks**: Background tasks communicate via typed message channels
 //! - **Builder pattern**: Clean, composable application setup
+//! - **Tabs support**: Built-in tab management with enable/disable support
 //! - **Minimal allocations**: Designed for efficiency in hot paths
-//! - **Runtime control**: Toggle mouse capture, quit, etc. via `AppContext`
+//! - **Runtime control**: Toggle mouse capture, navigate tabs, quit via contexts
 //!
 //! ## Quick Start
 //!
 //! ```ignore
-//! use interax_tui_fwk::{AppBuilder, Component, MainUi, Event, AppContext};
+//! use interax_tui_fwk::{AppBuilder, Component, MainUi, Event, AppContext, DrawContext};
 //! use ratatui::{Frame, layout::Rect, widgets::Paragraph};
 //!
-//! struct MyApp {
-//!     counter: u32,
-//! }
+//! struct MyApp;
 //!
 //! impl Component for MyApp {
-//!     fn draw(&self, frame: &mut Frame, area: Rect) {
-//!         let text = format!("Counter: {}", self.counter);
-//!         frame.render_widget(Paragraph::new(text), area);
+//!     fn draw(&self, frame: &mut Frame, area: Rect, ctx: &DrawContext) {
+//!         frame.render_widget(Paragraph::new("Hello!"), area);
 //!     }
 //!
 //!     fn handle_event(&mut self, event: &Event, ctx: &mut AppContext) -> bool {
@@ -44,8 +42,7 @@
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let app = AppBuilder::new()
-//!         .main_ui(MyApp { counter: 0 })
-//!         .mouse_capture(true)  // Enable mouse events (default)
+//!         .main_ui(MyApp)
 //!         .build()?;
 //!
 //!     app.run().await?;
@@ -53,61 +50,47 @@
 //! }
 //! ```
 //!
-//! ## Background Tasks
+//! ## Tabs
 //!
-//! Tasks run asynchronously and send typed messages to the UI:
+//! Register tabs with the application and use the context to draw and navigate them:
 //!
 //! ```ignore
-//! use interax_tui_fwk::{Task, TaskContext, TaskSender};
+//! use interax_tui_fwk::{Tab, AppBuilder, Component, MainUi, DrawContext, AppContext};
 //!
-//! struct TickerTask;
+//! struct HomeTab;
 //!
-//! #[derive(Debug)]
-//! struct Tick(u64);
+//! impl Tab for HomeTab {
+//!     fn id(&self) -> &str { "home" }
+//!     fn title(&self) -> &str { "Home" }
+//!     fn draw(&self, frame: &mut Frame, area: Rect) {
+//!         frame.render_widget(Paragraph::new("Home content"), area);
+//!     }
+//! }
 //!
-//! impl Task for TickerTask {
-//!     type Message = Tick;
+//! struct MyApp;
 //!
-//!     async fn run(self, sender: TaskSender<Self::Message>, mut ctx: TaskContext) {
-//!         let mut count = 0;
-//!         let mut interval = tokio::time::interval(Duration::from_secs(1));
+//! impl Component for MyApp {
+//!     fn draw(&self, frame: &mut Frame, area: Rect, ctx: &DrawContext) {
+//!         // Draw tab bar and content
+//!         ctx.tabs().draw_tabbar(frame, tab_bar_area);
+//!         ctx.tabs().draw_content(frame, content_area);
+//!     }
 //!
-//!         loop {
-//!             tokio::select! {
-//!                 _ = interval.tick() => {
-//!                     count += 1;
-//!                     if sender.send(Tick(count)).await.is_err() {
-//!                         break;
-//!                     }
-//!                 }
-//!                 _ = ctx.cancelled() => break,
-//!             }
+//!     fn handle_event(&mut self, event: &Event, ctx: &mut AppContext) -> bool {
+//!         // Navigate with Tab key
+//!         if event.is_key(KeyCode::Tab) {
+//!             ctx.tabs().select_next();
+//!             return true;
 //!         }
+//!         false
 //!     }
 //! }
-//! ```
 //!
-//! ## Runtime Control
-//!
-//! Use `AppContext` to control the application at runtime:
-//!
-//! ```ignore
-//! fn handle_event(&mut self, event: &Event, ctx: &mut AppContext) -> bool {
-//!     // Toggle mouse capture with 'm' key
-//!     if event.is_key(KeyCode::Char('m')) {
-//!         let enabled = ctx.mouse_capture_enabled();
-//!         ctx.set_mouse_capture(!enabled).ok();
-//!         return true;
-//!     }
-//!     
-//!     // Quit with 'q'
-//!     if event.is_key(KeyCode::Char('q')) {
-//!         ctx.quit();
-//!         return true;
-//!     }
-//!     
-//!     false
-//! }
+//! let app = AppBuilder::new()
+//!     .main_ui(MyApp)
+//!     .add_tab(HomeTab)
+//!     .add_tab(SettingsTab)
+//!     .build()?;
 //! ```
 
 pub mod app;
@@ -115,6 +98,7 @@ pub mod bus;
 pub mod component;
 pub mod context;
 pub mod event;
+pub mod tabs;
 pub mod task;
 pub mod terminal;
 
@@ -122,8 +106,9 @@ pub mod terminal;
 pub use app::{App, AppBuilder, AppError, BuildError};
 pub use bus::{MessageBus, SendError, TaskMessage, TaskSender, TrySendError};
 pub use component::{BoxedComponent, Component, ComponentExt, MainUi};
-pub use context::AppContext;
+pub use context::{AppContext, DrawContext, TabsDrawContext, TabsEventContext};
 pub use event::{Event, KeyCode, KeyModifiers, MouseButton, MouseEventKind};
+pub use tabs::{BoxedTab, Tab, TabInfo, TabManager};
 pub use task::{Task, TaskContext, TaskHandle};
 pub use terminal::{install_panic_hook, Terminal, TerminalConfig, TerminalError};
 

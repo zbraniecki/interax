@@ -551,6 +551,11 @@ dependencies = [
 [[package]]
 name = "interax-tui-monitor"
 version = "0.1.0"
+dependencies = [
+ "interax-tui-fwk",
+ "ratatui",
+ "tokio",
+]
 
 [[package]]
 name = "itertools"

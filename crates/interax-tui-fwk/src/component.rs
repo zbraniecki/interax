@@ -4,7 +4,7 @@
 
 use ratatui::{layout::Rect, Frame};
 
-use crate::context::AppContext;
+use crate::context::{AppContext, DrawContext};
 use crate::event::Event;
 
 /// A UI component that can draw itself and handle events.
@@ -15,7 +15,7 @@ use crate::event::Event;
 /// # Example
 ///
 /// ```ignore
-/// use interax_tui_fwk::{Component, Event, AppContext, KeyCode};
+/// use interax_tui_fwk::{Component, Event, AppContext, DrawContext, KeyCode};
 /// use ratatui::{Frame, layout::Rect, widgets::Paragraph};
 ///
 /// struct Counter {
@@ -23,9 +23,13 @@ use crate::event::Event;
 /// }
 ///
 /// impl Component for Counter {
-///     fn draw(&self, frame: &mut Frame, area: Rect) {
+///     fn draw(&self, frame: &mut Frame, area: Rect, ctx: &DrawContext) {
 ///         let text = format!("Count: {}", self.count);
 ///         frame.render_widget(Paragraph::new(text), area);
+///         
+///         // If tabs are registered, you can draw them:
+///         // ctx.tabs().draw_tabbar(frame, tab_area);
+///         // ctx.tabs().draw_content(frame, content_area);
 ///     }
 ///
 ///     fn handle_event(&mut self, event: &Event, ctx: &mut AppContext) -> bool {
@@ -50,12 +54,14 @@ pub trait Component: Send {
     /// This method should render the component's current state to the terminal.
     /// The `area` parameter defines the rectangular region where the component
     /// should draw itself.
-    fn draw(&self, frame: &mut Frame, area: Rect);
+    ///
+    /// The `ctx` parameter provides access to tabs and other drawing utilities.
+    fn draw(&self, frame: &mut Frame, area: Rect, ctx: &DrawContext);
 
     /// Handle an input event.
     ///
     /// The `ctx` parameter provides access to application-level controls
-    /// like quitting the app or toggling mouse capture.
+    /// like quitting the app, toggling mouse capture, or navigating tabs.
     ///
     /// Returns `true` if the event was consumed and should not propagate
     /// to other components, `false` otherwise.
@@ -84,16 +90,22 @@ pub trait Component: Send {
 /// # Example
 ///
 /// ```ignore
-/// use interax_tui_fwk::{Component, MainUi, Event, AppContext};
-/// use ratatui::{Frame, layout::Rect};
+/// use interax_tui_fwk::{Component, MainUi, Event, AppContext, DrawContext};
+/// use ratatui::{Frame, layout::{Rect, Layout, Direction, Constraint}};
 ///
-/// struct MyApp {
-///     tabs: TabsComponent,
-/// }
+/// struct MyApp;
 ///
 /// impl Component for MyApp {
-///     fn draw(&self, frame: &mut Frame, area: Rect) {
-///         self.tabs.draw(frame, area);
+///     fn draw(&self, frame: &mut Frame, area: Rect, ctx: &DrawContext) {
+///         // Split area for tabs
+///         let chunks = Layout::default()
+///             .direction(Direction::Vertical)
+///             .constraints([Constraint::Length(2), Constraint::Min(0)])
+///             .split(area);
+///         
+///         // Draw tab bar and content
+///         ctx.tabs().draw_tabbar(frame, chunks[0]);
+///         ctx.tabs().draw_content(frame, chunks[1]);
 ///     }
 ///
 ///     fn handle_event(&mut self, event: &Event, ctx: &mut AppContext) -> bool {
@@ -101,7 +113,14 @@ pub trait Component: Send {
 ///             ctx.quit();
 ///             return true;
 ///         }
-///         self.tabs.handle_event(event, ctx)
+///         
+///         // Navigate tabs with Tab key
+///         if event.is_key(KeyCode::Tab) {
+///             ctx.tabs().select_next();
+///             return true;
+///         }
+///         
+///         false
 ///     }
 /// }
 ///

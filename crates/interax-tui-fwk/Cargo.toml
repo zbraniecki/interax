@@ -9,9 +9,9 @@ license.workspace = true
 categories.workspace = true
 
 [dependencies]
-ratatui = "0.30"
+ratatui = {workspace = true }
 crossterm = { version = "0.28", features = ["event-stream"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+tokio = { workspace = true }
 futures = "0.3"
 smallvec = "1.13"
 

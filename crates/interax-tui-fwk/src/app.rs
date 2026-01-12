@@ -12,8 +12,9 @@ use tokio::sync::watch;
 
 use crate::bus::{MessageBus, TaskMessage, TaskSender};
 use crate::component::MainUi;
-use crate::context::AppContext;
+use crate::context::{AppContext, DrawContext};
 use crate::event::Event;
+use crate::tabs::{Tab, TabManager};
 use crate::task::{BoxedTaskFuture, Task, TaskContext, TaskFactory, TaskHandle};
 use crate::terminal::{install_panic_hook, Terminal, TerminalConfig, TerminalError};
 
@@ -103,9 +104,10 @@ struct PendingTask {
 ///
 /// let app = AppBuilder::new()
 ///     .main_ui(MyMainUi::new())
+///     .add_tab(HomeTab::new())
+///     .add_tab(SettingsTab::new())
 ///     .add_task("ticker", TickerTask::new())
-///     .mouse_capture(true)  // Enable mouse events (default)
-///     .tick_rate(Duration::from_millis(250))
+///     .mouse_capture(true)
 ///     .build()?;
 ///
 /// app.run().await?;
@@ -114,6 +116,7 @@ pub struct AppBuilder<M: MainUi> {
     main_ui: Option<M>,
     tasks: Vec<PendingTask>,
     bus: MessageBus,
+    tab_manager: TabManager,
     tick_rate: Option<Duration>,
     mouse_capture: bool,
 }
@@ -125,8 +128,9 @@ impl<M: MainUi + 'static> AppBuilder<M> {
             main_ui: None,
             tasks: Vec::new(),
             bus: MessageBus::new(),
+            tab_manager: TabManager::new(),
             tick_rate: None,
-            mouse_capture: true, // Default to enabled
+            mouse_capture: true,
         }
     }
 
@@ -135,6 +139,25 @@ impl<M: MainUi + 'static> AppBuilder<M> {
     /// This is required before building the application.
     pub fn main_ui(mut self, ui: M) -> Self {
         self.main_ui = Some(ui);
+        self
+    }
+
+    /// Add a tab to the application.
+    ///
+    /// Tabs are displayed in the order they are added. The first tab
+    /// added will be the initially active tab.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let app = AppBuilder::new()
+    ///     .main_ui(MyApp::new())
+    ///     .add_tab(HomeTab::new())
+    ///     .add_tab(SettingsTab::new())
+    ///     .build()?;
+    /// ```
+    pub fn add_tab<T: Tab + 'static>(mut self, tab: T) -> Self {
+        self.tab_manager.add(tab);
         self
     }
 
@@ -187,6 +210,7 @@ impl<M: MainUi + 'static> AppBuilder<M> {
             main_ui,
             tasks: self.tasks,
             bus: self.bus,
+            tab_manager: self.tab_manager,
             tick_rate: self.tick_rate,
             terminal_config: TerminalConfig {
                 mouse_capture: self.mouse_capture,
@@ -206,6 +230,7 @@ pub struct App<M: MainUi> {
     main_ui: M,
     tasks: Vec<PendingTask>,
     bus: MessageBus,
+    tab_manager: TabManager,
     tick_rate: Option<Duration>,
     terminal_config: TerminalConfig,
 }
@@ -274,7 +299,7 @@ impl<M: MainUi + 'static> App<M> {
 
         loop {
             // Create context for this iteration
-            let mut ctx = AppContext::new(terminal);
+            let mut ctx = AppContext::new(terminal, &mut self.tab_manager);
 
             // Wait for an event
             let needs_redraw = if let Some(ref mut interval) = tick_interval {
@@ -368,9 +393,10 @@ impl<M: MainUi + 'static> App<M> {
 
     /// Draw the UI.
     fn draw(&mut self, terminal: &mut Terminal) -> Result<(), AppError> {
+        let draw_ctx = DrawContext::new(&self.tab_manager);
         terminal.draw(|frame| {
             let area = frame.area();
-            self.main_ui.draw(frame, area);
+            self.main_ui.draw(frame, area, &draw_ctx);
         })?;
         Ok(())
     }
