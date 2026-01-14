@@ -12,8 +12,9 @@ use tokio::sync::watch;
 
 use crate::bus::{MessageBus, TaskMessage, TaskSender};
 use crate::component::MainUi;
-use crate::context::{AppContext, DrawContext};
+use crate::context::{AppContext, DrawContext, TabEventContext};
 use crate::event::Event;
+use crate::focus::FocusManager;
 use crate::tabs::{Tab, TabManager};
 use crate::task::{BoxedTaskFuture, Task, TaskContext, TaskFactory, TaskHandle};
 use crate::terminal::{install_panic_hook, Terminal, TerminalConfig, TerminalError};
@@ -117,6 +118,7 @@ pub struct AppBuilder<M: MainUi> {
     tasks: Vec<PendingTask>,
     bus: MessageBus,
     tab_manager: TabManager,
+    focus_manager: FocusManager,
     tick_rate: Option<Duration>,
     mouse_capture: bool,
 }
@@ -129,6 +131,7 @@ impl<M: MainUi + 'static> AppBuilder<M> {
             tasks: Vec::new(),
             bus: MessageBus::new(),
             tab_manager: TabManager::new(),
+            focus_manager: FocusManager::new(),
             tick_rate: None,
             mouse_capture: true,
         }
@@ -211,11 +214,31 @@ impl<M: MainUi + 'static> AppBuilder<M> {
             tasks: self.tasks,
             bus: self.bus,
             tab_manager: self.tab_manager,
+            focus_manager: self.focus_manager,
             tick_rate: self.tick_rate,
             terminal_config: TerminalConfig {
                 mouse_capture: self.mouse_capture,
             },
         })
+    }
+
+    /// Register a focusable element.
+    ///
+    /// Elements are focused in registration order.
+    /// Use this to pre-register focusable elements before the app runs.
+    pub fn register_focus(mut self, id: &str) -> Self {
+        self.focus_manager.register(id);
+        self
+    }
+
+    /// Set initial focus to a specific element.
+    ///
+    /// The element must be registered (either via `register_focus` or
+    /// will be registered at runtime).
+    pub fn initial_focus(mut self, id: &str) -> Self {
+        self.focus_manager.register(id);
+        self.focus_manager.set_focus(id);
+        self
     }
 }
 
@@ -231,6 +254,7 @@ pub struct App<M: MainUi> {
     tasks: Vec<PendingTask>,
     bus: MessageBus,
     tab_manager: TabManager,
+    focus_manager: FocusManager,
     tick_rate: Option<Duration>,
     terminal_config: TerminalConfig,
 }
@@ -263,9 +287,7 @@ impl<M: MainUi + 'static> App<M> {
         }
 
         // Run the event loop
-        let result = self
-            .run_event_loop(&mut terminal, &mut message_rx)
-            .await;
+        let result = self.run_event_loop(&mut terminal, &mut message_rx).await;
 
         // Signal all tasks to stop
         let _ = cancel_tx.send(true);
@@ -297,12 +319,12 @@ impl<M: MainUi + 'static> App<M> {
         // Initial draw
         self.draw(terminal)?;
 
-        loop {
-            // Create context for this iteration
-            let mut ctx = AppContext::new(terminal, &mut self.tab_manager);
+        // Track if we should quit
+        let mut should_quit = false;
 
+        loop {
             // Wait for an event
-            let needs_redraw = if let Some(ref mut interval) = tick_interval {
+            let (needs_redraw, event_to_dispatch) = if let Some(ref mut interval) = tick_interval {
                 tokio::select! {
                     biased;
 
@@ -311,8 +333,7 @@ impl<M: MainUi + 'static> App<M> {
                         match event {
                             Some(Ok(crossterm_event)) => {
                                 let event = Event::from(crossterm_event);
-                                self.main_ui.handle_event(&event, &mut ctx);
-                                true
+                                (true, Some(event))
                             }
                             Some(Err(e)) => return Err(AppError::Io(e)),
                             None => break, // Stream ended
@@ -323,11 +344,18 @@ impl<M: MainUi + 'static> App<M> {
                     msg = message_rx.recv() => {
                         match msg {
                             Some(task_message) => {
-                                self.main_ui.handle_task_message(
+                                let mut ctx = AppContext::new(
+                                    terminal,
+                                    &mut self.tab_manager,
+                                    &mut self.focus_manager,
+                                );
+                                let redraw = self.main_ui.handle_task_message(
                                     task_message.task_name,
                                     task_message.payload,
                                     &mut ctx,
-                                )
+                                );
+                                should_quit = ctx.should_quit();
+                                (redraw, None)
                             }
                             None => break, // All senders dropped
                         }
@@ -335,8 +363,14 @@ impl<M: MainUi + 'static> App<M> {
 
                     // Tick timer
                     _ = interval.tick() => {
+                        let mut ctx = AppContext::new(
+                            terminal,
+                            &mut self.tab_manager,
+                            &mut self.focus_manager,
+                        );
                         self.main_ui.tick(&mut ctx);
-                        true
+                        should_quit = ctx.should_quit();
+                        (true, None)
                     }
                 }
             } else {
@@ -349,8 +383,7 @@ impl<M: MainUi + 'static> App<M> {
                         match event {
                             Some(Ok(crossterm_event)) => {
                                 let event = Event::from(crossterm_event);
-                                self.main_ui.handle_event(&event, &mut ctx);
-                                true
+                                (true, Some(event))
                             }
                             Some(Err(e)) => return Err(AppError::Io(e)),
                             None => break, // Stream ended
@@ -361,24 +394,53 @@ impl<M: MainUi + 'static> App<M> {
                     msg = message_rx.recv() => {
                         match msg {
                             Some(task_message) => {
-                                self.main_ui.handle_task_message(
+                                let mut ctx = AppContext::new(
+                                    terminal,
+                                    &mut self.tab_manager,
+                                    &mut self.focus_manager,
+                                );
+                                let redraw = self.main_ui.handle_task_message(
                                     task_message.task_name,
                                     task_message.payload,
                                     &mut ctx,
-                                )
+                                );
+                                should_quit = ctx.should_quit();
+                                (redraw, None)
                             }
                             None => {
                                 // All senders dropped - if no tasks, this is expected
                                 // Keep running as long as there are terminal events
-                                false
+                                (false, None)
                             }
                         }
                     }
                 }
             };
 
-            // Check if we should quit after processing the event
-            if ctx.should_quit() {
+            // Dispatch event if we have one
+            if let Some(event) = event_to_dispatch {
+                // Two-phase event dispatch to handle borrow conflicts:
+                //
+                // Phase 1: MainUi handles the event (can handle quit, tab switching, etc.)
+                let main_result = {
+                    let mut ctx =
+                        AppContext::new(terminal, &mut self.tab_manager, &mut self.focus_manager);
+                    let result = self.main_ui.handle_event(&event, &mut ctx);
+                    should_quit = ctx.should_quit();
+                    result
+                };
+
+                // Phase 2: If MainUi didn't handle it, delegate to active tab
+                // Uses TabEventContext which doesn't include TabManager, avoiding borrow conflicts
+                if main_result.should_propagate() && !should_quit {
+                    let mut tab_ctx = TabEventContext::new(terminal, &mut self.focus_manager);
+                    self.tab_manager.handle_event(&event, &mut tab_ctx);
+                    should_quit = should_quit || tab_ctx.should_quit();
+                }
+            }
+
+            // Check if we should quit
+            if should_quit {
                 break;
             }
 
@@ -393,7 +455,7 @@ impl<M: MainUi + 'static> App<M> {
 
     /// Draw the UI.
     fn draw(&mut self, terminal: &mut Terminal) -> Result<(), AppError> {
-        let draw_ctx = DrawContext::new(&self.tab_manager);
+        let draw_ctx = DrawContext::new(&self.tab_manager, &self.focus_manager);
         terminal.draw(|frame| {
             let area = frame.area();
             self.main_ui.draw(frame, area, &draw_ctx);

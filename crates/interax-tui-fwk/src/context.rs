@@ -6,8 +6,80 @@
 
 use ratatui::{layout::Rect, Frame};
 
+use crate::focus::FocusManager;
 use crate::tabs::{TabInfo, TabManager};
 use crate::terminal::{Terminal, TerminalError};
+
+// =============================================================================
+// TabEventContext - Context for Tab event handlers (no TabManager access)
+// =============================================================================
+
+/// Context passed to Tab event handlers.
+///
+/// This is a subset of `AppContext` that doesn't include tab management,
+/// allowing tabs to be called without circular borrow issues.
+///
+/// `TabEventContext` provides methods to:
+/// - Request application quit
+/// - Toggle mouse capture
+/// - Access terminal state
+/// - Navigate focus
+pub struct TabEventContext<'a> {
+    pub(crate) terminal: &'a mut Terminal,
+    pub(crate) focus_manager: &'a mut FocusManager,
+    pub(crate) should_quit: bool,
+}
+
+impl<'a> TabEventContext<'a> {
+    /// Create a new tab event context.
+    pub(crate) fn new(terminal: &'a mut Terminal, focus_manager: &'a mut FocusManager) -> Self {
+        Self {
+            terminal,
+            focus_manager,
+            should_quit: false,
+        }
+    }
+
+    /// Request the application to quit.
+    #[inline]
+    pub fn quit(&mut self) {
+        self.should_quit = true;
+    }
+
+    /// Check if quit has been requested.
+    #[inline]
+    pub fn should_quit(&self) -> bool {
+        self.should_quit
+    }
+
+    /// Check if mouse capture is currently enabled.
+    #[inline]
+    pub fn mouse_capture_enabled(&self) -> bool {
+        self.terminal.mouse_capture_enabled()
+    }
+
+    /// Enable or disable mouse capture at runtime.
+    pub fn set_mouse_capture(&mut self, enabled: bool) -> Result<(), TerminalError> {
+        self.terminal.set_mouse_capture(enabled)
+    }
+
+    /// Get the terminal size.
+    pub fn terminal_size(&self) -> Result<Rect, TerminalError> {
+        self.terminal.size()
+    }
+
+    /// Access focus controls for event handling.
+    #[inline]
+    pub fn focus(&mut self) -> FocusEventContext<'_> {
+        FocusEventContext {
+            manager: self.focus_manager,
+        }
+    }
+}
+
+// =============================================================================
+// AppContext - Full context for MainUi and Component handlers
+// =============================================================================
 
 /// Context passed to event handlers for controlling the application.
 ///
@@ -16,41 +88,48 @@ use crate::terminal::{Terminal, TerminalError};
 /// - Toggle mouse capture
 /// - Access terminal state
 /// - Control tab selection
+/// - Navigate focus
 ///
 /// # Example
 ///
 /// ```ignore
-/// use interax_tui_fwk::{Component, Event, AppContext, KeyCode};
+/// use interax_tui_fwk::{Component, Event, AppContext, EventResult, KeyCode};
 ///
 /// impl Component for MyApp {
-///     fn handle_event(&mut self, event: &Event, ctx: &mut AppContext) -> bool {
+///     fn handle_event(&mut self, event: &Event, ctx: &mut AppContext) -> EventResult {
 ///         if event.is_quit() {
 ///             ctx.quit();
-///             return true;
+///             return EventResult::Handled;
 ///         }
 ///         
-///         // Switch tabs with Tab key
+///         // Navigate focus with Tab key
 ///         if event.is_key(KeyCode::Tab) {
-///             ctx.tabs().select_next();
-///             return true;
+///             ctx.focus().focus_next();
+///             return EventResult::Handled;
 ///         }
 ///         
-///         false
+///         EventResult::Unhandled
 ///     }
 /// }
 /// ```
 pub struct AppContext<'a> {
     pub(crate) terminal: &'a mut Terminal,
     pub(crate) tab_manager: &'a mut TabManager,
+    pub(crate) focus_manager: &'a mut FocusManager,
     pub(crate) should_quit: bool,
 }
 
 impl<'a> AppContext<'a> {
     /// Create a new application context.
-    pub(crate) fn new(terminal: &'a mut Terminal, tab_manager: &'a mut TabManager) -> Self {
+    pub(crate) fn new(
+        terminal: &'a mut Terminal,
+        tab_manager: &'a mut TabManager,
+        focus_manager: &'a mut FocusManager,
+    ) -> Self {
         Self {
             terminal,
             tab_manager,
+            focus_manager,
             should_quit: false,
         }
     }
@@ -109,6 +188,88 @@ impl<'a> AppContext<'a> {
         TabsEventContext {
             manager: self.tab_manager,
         }
+    }
+
+    /// Access focus controls for event handling.
+    ///
+    /// Use this to navigate focus, check focused state, etc.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Move focus to next element
+    /// ctx.focus().focus_next();
+    ///
+    /// // Set focus to a specific element
+    /// ctx.focus().set_focus("my_widget");
+    ///
+    /// // Check what's focused
+    /// if let Some(id) = ctx.focus().focused_id() {
+    ///     println!("Focused: {}", id);
+    /// }
+    /// ```
+    #[inline]
+    pub fn focus(&mut self) -> FocusEventContext<'_> {
+        FocusEventContext {
+            manager: self.focus_manager,
+        }
+    }
+}
+
+/// Focus controls available during event handling.
+///
+/// Access this through `AppContext::focus()`.
+pub struct FocusEventContext<'a> {
+    manager: &'a mut FocusManager,
+}
+
+impl FocusEventContext<'_> {
+    /// Get the ID of the currently focused element.
+    pub fn focused_id(&self) -> Option<&str> {
+        self.manager.focused_id()
+    }
+
+    /// Check if a specific element is currently focused.
+    pub fn is_focused(&self, id: &str) -> bool {
+        self.manager.is_focused(id)
+    }
+
+    /// Set focus to a specific element by ID.
+    ///
+    /// Returns `true` if the element was found and focused.
+    pub fn set_focus(&mut self, id: &str) -> bool {
+        self.manager.set_focus(id)
+    }
+
+    /// Clear focus (no element is focused).
+    pub fn clear_focus(&mut self) {
+        self.manager.clear_focus();
+    }
+
+    /// Move focus to the next element.
+    ///
+    /// Returns `true` if focus moved.
+    pub fn focus_next(&mut self) -> bool {
+        self.manager.focus_next()
+    }
+
+    /// Move focus to the previous element.
+    ///
+    /// Returns `true` if focus moved.
+    pub fn focus_prev(&mut self) -> bool {
+        self.manager.focus_prev()
+    }
+
+    /// Register a focusable element.
+    ///
+    /// Elements are focused in registration order.
+    pub fn register(&mut self, id: &str) {
+        self.manager.register(id);
+    }
+
+    /// Unregister a focusable element.
+    pub fn unregister(&mut self, id: &str) {
+        self.manager.unregister(id);
     }
 }
 
@@ -213,32 +374,42 @@ impl TabsEventContext<'_> {
 /// `DrawContext` provides access to:
 /// - Tab bar and content drawing
 /// - Tab information
+/// - Focus state (for visual highlighting)
 ///
 /// # Example
 ///
 /// ```ignore
 /// use interax_tui_fwk::{Component, DrawContext};
-/// use ratatui::{Frame, layout::Rect};
+/// use ratatui::{Frame, layout::Rect, style::{Color, Style}};
 ///
-/// impl Component for MyApp {
+/// impl Component for MyWidget {
+///     fn focus_id(&self) -> Option<&str> {
+///         Some("my_widget")
+///     }
+///
 ///     fn draw(&self, frame: &mut Frame, area: Rect, ctx: &DrawContext) {
-///         // Draw the tab bar at the top
-///         let tab_bar_height = 2;
-///         let (tab_area, content_area) = split_vertical(area, tab_bar_height);
-///         
-///         ctx.tabs().draw_tabbar(frame, tab_area);
-///         ctx.tabs().draw_content(frame, content_area);
+///         // Highlight when focused
+///         let style = if ctx.focus().is_focused("my_widget") {
+///             Style::default().fg(Color::Yellow)
+///         } else {
+///             Style::default()
+///         };
+///         // Draw with style...
 ///     }
 /// }
 /// ```
 pub struct DrawContext<'a> {
     pub(crate) tab_manager: &'a TabManager,
+    pub(crate) focus_manager: &'a FocusManager,
 }
 
 impl<'a> DrawContext<'a> {
     /// Create a new draw context.
-    pub(crate) fn new(tab_manager: &'a TabManager) -> Self {
-        Self { tab_manager }
+    pub(crate) fn new(tab_manager: &'a TabManager, focus_manager: &'a FocusManager) -> Self {
+        Self {
+            tab_manager,
+            focus_manager,
+        }
     }
 
     /// Access tab information and drawing methods.
@@ -247,6 +418,44 @@ impl<'a> DrawContext<'a> {
         TabsDrawContext {
             manager: self.tab_manager,
         }
+    }
+
+    /// Access focus state for visual rendering.
+    ///
+    /// Use this to check if elements are focused for highlighting.
+    #[inline]
+    pub fn focus(&self) -> FocusDrawContext<'_> {
+        FocusDrawContext {
+            manager: self.focus_manager,
+        }
+    }
+}
+
+/// Focus drawing context available during rendering.
+///
+/// Access this through `DrawContext::focus()`.
+pub struct FocusDrawContext<'a> {
+    manager: &'a FocusManager,
+}
+
+impl FocusDrawContext<'_> {
+    /// Get the ID of the currently focused element.
+    pub fn focused_id(&self) -> Option<&str> {
+        self.manager.focused_id()
+    }
+
+    /// Check if a specific element is currently focused.
+    ///
+    /// Use this to apply visual highlighting to focused elements.
+    pub fn is_focused(&self, id: &str) -> bool {
+        self.manager.is_focused(id)
+    }
+
+    /// Check if a specific element is in the focus chain.
+    ///
+    /// For flat focus, this is the same as `is_focused`.
+    pub fn is_in_focus_chain(&self, id: &str) -> bool {
+        self.manager.is_in_focus_chain(id)
     }
 }
 

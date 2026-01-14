@@ -15,8 +15,8 @@
 use std::time::Duration;
 
 use interax_tui_fwk::{
-    AppBuilder, AppContext, Component, DrawContext, Event, KeyCode, MainUi, Task, TaskContext,
-    TaskSender,
+    AppBuilder, AppContext, Component, DrawContext, Event, EventResult, KeyCode, MainUi, Task,
+    TaskContext, TaskSender,
 };
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -145,11 +145,11 @@ impl Component for CounterApp {
         frame.render_widget(footer, chunks[2]);
     }
 
-    fn handle_event(&mut self, event: &Event, ctx: &mut AppContext) -> bool {
+    fn handle_event(&mut self, event: &Event, ctx: &mut AppContext) -> EventResult {
         // Quit on Ctrl+C or Ctrl+Q
         if event.is_quit() {
             ctx.quit();
-            return true;
+            return EventResult::Handled;
         }
 
         // Handle specific key presses
@@ -157,19 +157,19 @@ impl Component for CounterApp {
             match key.code {
                 KeyCode::Char('q') => {
                     ctx.quit();
-                    true
+                    EventResult::Handled
                 }
                 KeyCode::Up => {
                     self.counter = self.counter.saturating_add(1);
-                    true
+                    EventResult::Handled
                 }
                 KeyCode::Down => {
                     self.counter = self.counter.saturating_sub(1);
-                    true
+                    EventResult::Handled
                 }
                 KeyCode::Char(' ') => {
                     self.auto_increment = !self.auto_increment;
-                    true
+                    EventResult::Handled
                 }
                 KeyCode::Char('m') => {
                     // Toggle mouse capture at runtime
@@ -177,16 +177,16 @@ impl Component for CounterApp {
                     if ctx.set_mouse_capture(new_state).is_ok() {
                         self.mouse_enabled = new_state;
                     }
-                    true
+                    EventResult::Handled
                 }
-                _ => false,
+                _ => EventResult::Unhandled,
             }
         } else if let Event::Mouse(_) = event {
             // Increment counter on any mouse event (to demonstrate mouse capture)
             self.counter = self.counter.saturating_add(1);
-            true
+            EventResult::Handled
         } else {
-            false
+            EventResult::Unhandled
         }
     }
 }

@@ -86,4 +86,3 @@ impl From<CrosstermEvent> for Event {
         }
     }
 }
-

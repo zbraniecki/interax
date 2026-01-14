@@ -18,7 +18,7 @@
 //! ## Quick Start
 //!
 //! ```ignore
-//! use interax_tui_fwk::{AppBuilder, Component, MainUi, Event, AppContext, DrawContext};
+//! use interax_tui_fwk::{AppBuilder, Component, MainUi, Event, AppContext, DrawContext, EventResult};
 //! use ratatui::{Frame, layout::Rect, widgets::Paragraph};
 //!
 //! struct MyApp;
@@ -28,12 +28,12 @@
 //!         frame.render_widget(Paragraph::new("Hello!"), area);
 //!     }
 //!
-//!     fn handle_event(&mut self, event: &Event, ctx: &mut AppContext) -> bool {
+//!     fn handle_event(&mut self, event: &Event, ctx: &mut AppContext) -> EventResult {
 //!         if event.is_quit() {
 //!             ctx.quit();
-//!             return true;
+//!             return EventResult::Handled;
 //!         }
-//!         false
+//!         EventResult::Unhandled
 //!     }
 //! }
 //!
@@ -55,7 +55,7 @@
 //! Register tabs with the application and use the context to draw and navigate them:
 //!
 //! ```ignore
-//! use interax_tui_fwk::{Tab, AppBuilder, Component, MainUi, DrawContext, AppContext};
+//! use interax_tui_fwk::{Tab, AppBuilder, Component, MainUi, DrawContext, AppContext, EventResult, KeyCode};
 //!
 //! struct HomeTab;
 //!
@@ -76,13 +76,13 @@
 //!         ctx.tabs().draw_content(frame, content_area);
 //!     }
 //!
-//!     fn handle_event(&mut self, event: &Event, ctx: &mut AppContext) -> bool {
+//!     fn handle_event(&mut self, event: &Event, ctx: &mut AppContext) -> EventResult {
 //!         // Navigate with Tab key
 //!         if event.is_key(KeyCode::Tab) {
 //!             ctx.tabs().select_next();
-//!             return true;
+//!             return EventResult::Handled;
 //!         }
-//!         false
+//!         EventResult::Unhandled
 //!     }
 //! }
 //!
@@ -98,6 +98,7 @@ pub mod bus;
 pub mod component;
 pub mod context;
 pub mod event;
+pub mod focus;
 pub mod tabs;
 pub mod task;
 pub mod terminal;
@@ -106,8 +107,12 @@ pub mod terminal;
 pub use app::{App, AppBuilder, AppError, BuildError};
 pub use bus::{MessageBus, SendError, TaskMessage, TaskSender, TrySendError};
 pub use component::{BoxedComponent, Component, ComponentExt, MainUi};
-pub use context::{AppContext, DrawContext, TabsDrawContext, TabsEventContext};
+pub use context::{
+    AppContext, DrawContext, FocusDrawContext, FocusEventContext, TabEventContext, TabsDrawContext,
+    TabsEventContext,
+};
 pub use event::{Event, KeyCode, KeyModifiers, MouseButton, MouseEventKind};
+pub use focus::{EventResult, FocusManager};
 pub use tabs::{BoxedTab, Tab, TabInfo, TabManager};
 pub use task::{Task, TaskContext, TaskHandle};
 pub use terminal::{install_panic_hook, Terminal, TerminalConfig, TerminalError};

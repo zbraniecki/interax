@@ -12,8 +12,9 @@ use ratatui::{
     Frame,
 };
 
-use crate::context::AppContext;
+use crate::context::TabEventContext;
 use crate::event::Event;
+use crate::focus::EventResult;
 
 /// A tab that can be displayed in the application.
 ///
@@ -56,10 +57,15 @@ pub trait Tab: Send {
 
     /// Handle an input event while this tab is active.
     ///
-    /// Returns `true` if the event was consumed.
+    /// Returns `EventResult::Handled` if the event was consumed,
+    /// `EventResult::Unhandled` to bubble to parent.
+    ///
+    /// Note: This uses `TabEventContext` instead of `AppContext` because
+    /// tabs cannot modify tab selection (that would create circular borrows).
+    /// Use the focus system for widget navigation within tabs.
     #[allow(unused_variables)]
-    fn handle_event(&mut self, event: &Event, ctx: &mut AppContext) -> bool {
-        false
+    fn handle_event(&mut self, event: &Event, ctx: &mut TabEventContext) -> EventResult {
+        EventResult::Unhandled
     }
 
     /// Check if this tab is enabled by default.
@@ -326,11 +332,11 @@ impl TabManager {
     }
 
     /// Handle an event for the active tab.
-    pub fn handle_event(&mut self, event: &Event, ctx: &mut AppContext) -> bool {
+    pub fn handle_event(&mut self, event: &Event, ctx: &mut TabEventContext) -> EventResult {
         if let Some(tab) = self.active_tab_mut() {
             tab.handle_event(event, ctx)
         } else {
-            false
+            EventResult::Unhandled
         }
     }
 }

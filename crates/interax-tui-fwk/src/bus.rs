@@ -100,10 +100,7 @@ impl MessageBus {
     /// Returns a sender that the task can use to send messages.
     /// Messages sent through this sender will be forwarded to the
     /// unified receiver with the task name attached.
-    pub fn register<T: Any + Send + 'static>(
-        &mut self,
-        task_name: &'static str,
-    ) -> TaskSender<T> {
+    pub fn register<T: Any + Send + 'static>(&mut self, task_name: &'static str) -> TaskSender<T> {
         self.registered_tasks.insert(task_name, ());
 
         TaskSender {
@@ -117,7 +114,10 @@ impl MessageBus {
     ///
     /// This is useful when you need additional senders for an already
     /// registered task.
-    pub fn sender<T: Any + Send + 'static>(&self, task_name: &'static str) -> Option<TaskSender<T>> {
+    pub fn sender<T: Any + Send + 'static>(
+        &self,
+        task_name: &'static str,
+    ) -> Option<TaskSender<T>> {
         if self.registered_tasks.contains_key(task_name) {
             Some(TaskSender {
                 task_name,
@@ -178,30 +178,27 @@ impl<T: Any + Send + 'static> TaskSender<T> {
     /// with the task name attached.
     pub async fn send(&self, message: T) -> Result<(), SendError<T>> {
         let task_message = TaskMessage::new(self.task_name, message);
-        self.unified_tx
-            .send(task_message)
-            .await
-            .map_err(|e| {
-                // Extract the original message from TaskMessage
-                let payload = e.0.payload;
-                let msg = payload.downcast::<T>().expect("type mismatch in TaskSender");
-                SendError(*msg)
-            })
+        self.unified_tx.send(task_message).await.map_err(|e| {
+            // Extract the original message from TaskMessage
+            let payload = e.0.payload;
+            let msg = payload
+                .downcast::<T>()
+                .expect("type mismatch in TaskSender");
+            SendError(*msg)
+        })
     }
 
     /// Try to send a message without blocking.
     pub fn try_send(&self, message: T) -> Result<(), TrySendError<T>> {
         let task_message = TaskMessage::new(self.task_name, message);
-        self.unified_tx.try_send(task_message).map_err(|e| {
-            match e {
-                mpsc::error::TrySendError::Full(tm) => {
-                    let msg = tm.payload.downcast::<T>().expect("type mismatch");
-                    TrySendError::Full(*msg)
-                }
-                mpsc::error::TrySendError::Closed(tm) => {
-                    let msg = tm.payload.downcast::<T>().expect("type mismatch");
-                    TrySendError::Closed(*msg)
-                }
+        self.unified_tx.try_send(task_message).map_err(|e| match e {
+            mpsc::error::TrySendError::Full(tm) => {
+                let msg = tm.payload.downcast::<T>().expect("type mismatch");
+                TrySendError::Full(*msg)
+            }
+            mpsc::error::TrySendError::Closed(tm) => {
+                let msg = tm.payload.downcast::<T>().expect("type mismatch");
+                TrySendError::Closed(*msg)
             }
         })
     }

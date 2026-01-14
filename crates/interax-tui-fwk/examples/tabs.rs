@@ -14,7 +14,8 @@
 //! - q/Ctrl+C: Quit
 
 use interax_tui_fwk::{
-    AppBuilder, AppContext, Component, DrawContext, Event, KeyCode, KeyModifiers, MainUi, Tab,
+    AppBuilder, AppContext, Component, DrawContext, Event, EventResult, KeyCode, KeyModifiers,
+    MainUi, Tab,
 };
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -188,18 +189,18 @@ impl Component for TabsApp {
         frame.render_widget(footer, chunks[2]);
     }
 
-    fn handle_event(&mut self, event: &Event, ctx: &mut AppContext) -> bool {
+    fn handle_event(&mut self, event: &Event, ctx: &mut AppContext) -> EventResult {
         // Quit on Ctrl+C or Ctrl+Q
         if event.is_quit() {
             ctx.quit();
-            return true;
+            return EventResult::Handled;
         }
 
         if let Event::Key(key) = event {
             match key.code {
                 KeyCode::Char('q') => {
                     ctx.quit();
-                    true
+                    EventResult::Handled
                 }
                 // Tab navigation
                 KeyCode::Tab => {
@@ -208,36 +209,36 @@ impl Component for TabsApp {
                     } else {
                         ctx.tabs().select_next();
                     }
-                    true
+                    EventResult::Handled
                 }
                 KeyCode::BackTab => {
                     ctx.tabs().select_prev();
-                    true
+                    EventResult::Handled
                 }
                 // Direct tab selection
                 KeyCode::Char('1') => {
                     ctx.tabs().select(0);
-                    true
+                    EventResult::Handled
                 }
                 KeyCode::Char('2') => {
                     ctx.tabs().select(1);
-                    true
+                    EventResult::Handled
                 }
                 KeyCode::Char('3') => {
                     ctx.tabs().select(2);
-                    true
+                    EventResult::Handled
                 }
                 // Toggle settings tab enabled/disabled
                 KeyCode::Char('d') => {
                     let currently_enabled = ctx.tabs().is_enabled("settings");
                     ctx.tabs().set_enabled("settings", !currently_enabled);
                     self.settings_enabled = !currently_enabled;
-                    true
+                    EventResult::Handled
                 }
-                _ => false,
+                _ => EventResult::Unhandled,
             }
         } else {
-            false
+            EventResult::Unhandled
         }
     }
 }

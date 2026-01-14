@@ -6,16 +6,28 @@ use ratatui::{layout::Rect, Frame};
 
 use crate::context::{AppContext, DrawContext};
 use crate::event::Event;
+use crate::focus::EventResult;
 
 /// A UI component that can draw itself and handle events.
 ///
 /// Components are the building blocks of your TUI application.
 /// They can be composed together to create complex interfaces.
 ///
+/// # Focus Model
+///
+/// Components can participate in focus navigation by implementing:
+/// - `focus_id()` - Return a unique ID to make this component focusable
+/// - `is_focusable()` - Whether this component can currently receive focus
+/// - `on_focus()` / `on_blur()` - Lifecycle callbacks for focus changes
+/// - `focus_children()` - Child focus IDs for hierarchical focus
+///
+/// **Important**: `handle_event` is only called on components in the focus chain.
+/// You don't need to check if you're focused - if you're called, you are.
+///
 /// # Example
 ///
 /// ```ignore
-/// use interax_tui_fwk::{Component, Event, AppContext, DrawContext, KeyCode};
+/// use interax_tui_fwk::{Component, Event, AppContext, DrawContext, EventResult, KeyCode};
 /// use ratatui::{Frame, layout::Rect, widgets::Paragraph};
 ///
 /// struct Counter {
@@ -23,27 +35,27 @@ use crate::event::Event;
 /// }
 ///
 /// impl Component for Counter {
+///     fn focus_id(&self) -> Option<&str> {
+///         Some("counter")
+///     }
+///
 ///     fn draw(&self, frame: &mut Frame, area: Rect, ctx: &DrawContext) {
 ///         let text = format!("Count: {}", self.count);
 ///         frame.render_widget(Paragraph::new(text), area);
-///         
-///         // If tabs are registered, you can draw them:
-///         // ctx.tabs().draw_tabbar(frame, tab_area);
-///         // ctx.tabs().draw_content(frame, content_area);
 ///     }
 ///
-///     fn handle_event(&mut self, event: &Event, ctx: &mut AppContext) -> bool {
+///     fn handle_event(&mut self, event: &Event, ctx: &mut AppContext) -> EventResult {
 ///         if event.is_key(KeyCode::Up) {
 ///             self.count = self.count.saturating_add(1);
-///             true
+///             EventResult::Handled
 ///         } else if event.is_key(KeyCode::Down) {
 ///             self.count = self.count.saturating_sub(1);
-///             true
+///             EventResult::Handled
 ///         } else if event.is_quit() {
 ///             ctx.quit();
-///             true
+///             EventResult::Handled
 ///         } else {
-///             false
+///             EventResult::Unhandled
 ///         }
 ///     }
 /// }
@@ -55,21 +67,27 @@ pub trait Component: Send {
     /// The `area` parameter defines the rectangular region where the component
     /// should draw itself.
     ///
-    /// The `ctx` parameter provides access to tabs and other drawing utilities.
+    /// The `ctx` parameter provides access to tabs, focus state, and other
+    /// drawing utilities.
     fn draw(&self, frame: &mut Frame, area: Rect, ctx: &DrawContext);
 
     /// Handle an input event.
     ///
+    /// **Note**: This method is only called if this component is in the focus chain.
+    /// You don't need to check if you're focused.
+    ///
     /// The `ctx` parameter provides access to application-level controls
-    /// like quitting the app, toggling mouse capture, or navigating tabs.
+    /// like quitting the app, toggling mouse capture, or navigating tabs/focus.
     ///
-    /// Returns `true` if the event was consumed and should not propagate
-    /// to other components, `false` otherwise.
+    /// Returns:
+    /// - `EventResult::Handled` - Event consumed, stop propagation
+    /// - `EventResult::Unhandled` - Bubble to parent component
+    /// - `EventResult::StopPropagation` - Stop propagation without handling
     ///
-    /// The default implementation does nothing and returns `false`.
+    /// The default implementation does nothing and returns `Unhandled`.
     #[allow(unused_variables)]
-    fn handle_event(&mut self, event: &Event, ctx: &mut AppContext) -> bool {
-        false
+    fn handle_event(&mut self, event: &Event, ctx: &mut AppContext) -> EventResult {
+        EventResult::Unhandled
     }
 
     /// Called on each tick cycle if the app has a tick rate configured.
@@ -80,6 +98,44 @@ pub trait Component: Send {
     /// The default implementation does nothing.
     #[allow(unused_variables)]
     fn tick(&mut self, ctx: &mut AppContext) {}
+
+    // --- Focus methods ---
+
+    /// Unique identifier for focus tracking.
+    ///
+    /// Return `Some("id")` to make this component focusable.
+    /// Return `None` (default) if this component should not receive focus.
+    fn focus_id(&self) -> Option<&str> {
+        None
+    }
+
+    /// Whether this component can currently receive focus.
+    ///
+    /// By default, returns `true` if `focus_id()` returns `Some`.
+    /// Override to dynamically enable/disable focus (e.g., for disabled widgets).
+    fn is_focusable(&self) -> bool {
+        self.focus_id().is_some()
+    }
+
+    /// Called when this component gains focus.
+    ///
+    /// Use this to update visual state, start animations, etc.
+    fn on_focus(&mut self) {}
+
+    /// Called when this component loses focus.
+    ///
+    /// Use this to update visual state, stop animations, etc.
+    fn on_blur(&mut self) {}
+
+    /// List of focusable child IDs in navigation order.
+    ///
+    /// Override this if your component contains other focusable components
+    /// and you want to control their navigation order.
+    ///
+    /// The default returns an empty list (no focusable children).
+    fn focus_children(&self) -> Vec<&str> {
+        vec![]
+    }
 }
 
 /// The main UI trait for the root component of your application.
@@ -90,7 +146,7 @@ pub trait Component: Send {
 /// # Example
 ///
 /// ```ignore
-/// use interax_tui_fwk::{Component, MainUi, Event, AppContext, DrawContext};
+/// use interax_tui_fwk::{Component, MainUi, Event, AppContext, DrawContext, EventResult, KeyCode};
 /// use ratatui::{Frame, layout::{Rect, Layout, Direction, Constraint}};
 ///
 /// struct MyApp;
@@ -108,19 +164,19 @@ pub trait Component: Send {
 ///         ctx.tabs().draw_content(frame, chunks[1]);
 ///     }
 ///
-///     fn handle_event(&mut self, event: &Event, ctx: &mut AppContext) -> bool {
+///     fn handle_event(&mut self, event: &Event, ctx: &mut AppContext) -> EventResult {
 ///         if event.is_quit() {
 ///             ctx.quit();
-///             return true;
+///             return EventResult::Handled;
 ///         }
 ///         
 ///         // Navigate tabs with Tab key
 ///         if event.is_key(KeyCode::Tab) {
 ///             ctx.tabs().select_next();
-///             return true;
+///             return EventResult::Handled;
 ///         }
 ///         
-///         false
+///         EventResult::Unhandled
 ///     }
 /// }
 ///
